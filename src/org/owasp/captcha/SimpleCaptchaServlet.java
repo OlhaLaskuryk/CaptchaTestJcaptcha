@@ -1,25 +1,26 @@
 package org.owasp.captcha;
 
 import java.awt.Color;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
+import java.awt.Font;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
-import javax.imageio.ImageIO;
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
-import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import com.octo.captcha.component.image.backgroundgenerator.GradientBackgroundGenerator;
-import com.octo.captcha.component.image.fontgenerator.RandomFontGenerator;
-import com.octo.captcha.component.image.textpaster.SimpleTextPaster;
-import com.octo.captcha.component.image.wordtoimage.ComposedWordToImage;
-import com.octo.captcha.component.image.wordtoimage.WordToImage;
+import nl.captcha.Captcha;
+import nl.captcha.backgrounds.GradiatedBackgroundProducer;
+import nl.captcha.gimpy.DropShadowGimpyRenderer;
+import nl.captcha.noise.CurvedLineNoiseProducer;
+import nl.captcha.noise.StraightLineNoiseProducer;
+import nl.captcha.servlet.CaptchaServletUtil;
+
 import com.octo.captcha.service.CaptchaServiceException;
 
 public class SimpleCaptchaServlet extends HttpServlet {
@@ -34,18 +35,11 @@ public class SimpleCaptchaServlet extends HttpServlet {
 
 		// For this servlet, supported image types are PNG and JPG.
 		sImgType = servletConfig.getInitParameter("ImageType");
-		sImgType = sImgType == null ? "png" : sImgType.trim().toLowerCase();
-		if (!sImgType.equalsIgnoreCase("png")
-				&& !sImgType.equalsIgnoreCase("jpg")
-				&& !sImgType.equalsIgnoreCase("jpeg")) {
-			sImgType = "png";
-		}
+		sImgType = sImgType == null ? "jpg" : sImgType.trim().toLowerCase();
 	}
 
 	protected void doGet(HttpServletRequest request,
 			HttpServletResponse response) throws ServletException, IOException {
-		ByteArrayOutputStream imgOutputStream = new ByteArrayOutputStream();
-		byte[] captchaBytes;
 
 		if (request.getQueryString() != null) {
 			response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
@@ -53,36 +47,41 @@ public class SimpleCaptchaServlet extends HttpServlet {
 			return;
 		}
 		try {
-			// Session ID is used to identify the particular captcha.
-			String captchaId = request.getSession().getId();
+			// // Session ID is used to identify the particular captcha.
+			// String captchaId = request.getSession().getId();
 
-			// Generate the captcha image.
-			// BufferedImage challengeImage = //new BufferedImage(200, 200, 1);
-			// MyCaptchaService.getInstance().getImageChallengeForID(captchaId,
-			// request.getLocale());
-			// Graphics g = challengeImage.getGraphics();
-			// g.drawString("23456", 10, 10);
+			// // Clear any existing flag.
+			// request.getSession().removeAttribute("PassedCaptcha");
+			List<Color> colors = new ArrayList<Color>();
+			colors.add(Color.DARK_GRAY);
+			colors.add(Color.GRAY);
 
-			Integer width = 300;
-			Integer height = 80;
-			WordToImage filter = new ComposedWordToImage(
-					new RandomFontGenerator(40, 60),
-					new GradientBackgroundGenerator(width, height, Color.darkGray, Color.lightGray), 
-							new SimpleTextPaster(6, 7, Color.lightGray));
-			//, new PuzzleImageDeformation(1, 1, 1), new PuzzleImageDeformation(1, 1, 1), new PuzzleImageDeformation(1, 1, 1));
-			BufferedImage challengeImage = filter.getImage("123456");
-			ImageIO.write(challengeImage, sImgType, imgOutputStream);
-			captchaBytes = imgOutputStream.toByteArray();
+			List<Font> fonts = new ArrayList<Font>();
+			//fonts.add(new Font("name", Font.BOLD, 43));
+			//fonts.add(new Font("name2", Font.ITALIC, 45));
+			fonts.add(new Font("name3", Font.ROMAN_BASELINE, 43));
 
-			// Clear any existing flag.
-			request.getSession().removeAttribute("PassedCaptcha");
+			Captcha captcha = new Captcha.Builder(130, 50)
+					.addNoise(new StraightLineNoiseProducer(Color.gray, 2))
+					.addNoise(new CurvedLineNoiseProducer(Color.gray, 2))
+
+					.addNoise(new StraightLineNoiseProducer(Color.DARK_GRAY, 2))
+					.addText(new IntegerTextProducer(4),
+							new ColoredWordRenderer(colors, fonts, 3))
+					.addNoise(new StraightLineNoiseProducer(Color.gray, 2))
+					.addNoise(new CurvedLineNoiseProducer(Color.gray, 2))
+					.gimp(new DropShadowGimpyRenderer())
+					.addBackground(
+							new GradiatedBackgroundProducer(Color.gray,
+									Color.lightGray)).addBorder().build(); // Required.
+			// display the image produced
+			CaptchaServletUtil.writeImage(response, captcha.getImage());
+
+			// save the captcha value on session
+			request.getSession().setAttribute("simpleCaptcha", captcha);
+
 		} catch (CaptchaServiceException cse) {
 			System.out.println("CaptchaServiceException - " + cse.getMessage());
-			response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-					"Problem generating captcha image.");
-			return;
-		} catch (IOException ioe) {
-			System.out.println("IOException - " + ioe.getMessage());
 			response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
 					"Problem generating captcha image.");
 			return;
@@ -92,14 +91,7 @@ public class SimpleCaptchaServlet extends HttpServlet {
 		response.setHeader("Cache-Control", "no-store");
 		response.setHeader("Pragma", "no-cache");
 		response.setDateHeader("Expires", 0);
-		response.setContentType("image/"
-				+ (sImgType.equalsIgnoreCase("png") ? "png" : "jpeg"));
-
-		// Write the image to the client.
-		ServletOutputStream outStream = response.getOutputStream();
-		outStream.write(captchaBytes);
-		outStream.flush();
-		outStream.close();
+		response.setContentType("image/jpeg");
 	}
 
 	protected void doPost(HttpServletRequest request,
